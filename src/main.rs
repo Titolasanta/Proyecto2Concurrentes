@@ -1,11 +1,11 @@
 extern crate rand;
-use rand::seq::SliceRandom;
 use std::env;
 use std::fs::File;
 use std::io::prelude::*;
 use std::error::Error;
+mod game;
 
-fn main()-> Result<(), Box<dyn Error>> {
+fn main() -> Result<(), Box<dyn Error>> {
 	let expected_arguments = 2;
 
     let args: Vec<String> = env::args().collect();
@@ -29,26 +29,9 @@ fn main()-> Result<(), Box<dyn Error>> {
     let mut file = File::create("log.txt")?;
     file.write_all(b"Hello, world!")?;
 
-    struct Card {
-        suit: String,
-        value: i32
-    }
+    let mut deck = game::create_deck();
+    game::shuffle_deck(&mut deck);
 
-    struct Deck {
-        cards: Vec<Card>
-    }
-
-    let mut cards: Vec<Card> = Vec::with_capacity(48);
-    for suit in &["Spades", "Diamonds", "Clubs", "Hearts"] {
-        for value in 1..13 {
-            cards.push(Card { suit: suit.to_string(), value });
-        }
-    }
-
-    let mut deck: Deck = Deck { cards: Vec::with_capacity(48) };
-    let mut rng = rand::thread_rng();
-    cards.shuffle(&mut rng);
-    deck.cards = cards;
     for card in deck.cards {
         println!("Card {} of {}", card.value, card.suit);
     }
