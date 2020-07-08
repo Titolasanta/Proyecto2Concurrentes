@@ -1,19 +1,17 @@
 extern crate rand;
-use std::fs::{OpenOptions};
-use std::io::{Write};
+
 use std::error::Error;
 
 mod validator;
+mod logger;
 mod game;
 
 fn main() -> Result<(), Box<dyn Error>> {
 	let (players, debug) = validator::validate_arguments()?;
 
-    println!("Cantidad de jugadores: {:?}", players);
-    println!("Modo de ejecución en debug: {:?}", debug);
-
-    let mut file = OpenOptions::new().append(true).create(true).open("log.txt")?;
-    writeln!(&mut file, "Hello, world!")?;
+    logger::log(String::from("--------------- Starting new run ---------------"))?;
+    logger::log(String::from("Cantidad de jugadores: ") + &*players.to_string())?;
+    logger::log(String::from("Modo de ejecución en debug: ") + &*debug.to_string())?;
 
     let mut deck = game::create_deck();
     game::shuffle_deck(&mut deck);
