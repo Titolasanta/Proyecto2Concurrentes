@@ -86,7 +86,6 @@ fn main() -> Result<(), Box<dyn Error>> {
             
             let my_round = &barrier_order_c2[(j -1) as usize];
       
-            let next_turn = &barrier_order_c[(j%players) as usize];
             
             
             'game: loop {
@@ -127,8 +126,7 @@ fn main() -> Result<(), Box<dyn Error>> {
                         let play :(i32, usize, Card) = (j, my_stack.len(), played_card);
                         tx_play_c.send(play).unwrap();
                         
-                        //es el turno del siguiente?
-                        next_turn.wait();
+                        my_turn.wait();
                             
                     }
                     "rustico" => {
@@ -150,7 +148,6 @@ fn main() -> Result<(), Box<dyn Error>> {
                     }
                     _ => {}
                 }
-                //espero que el handler me de paso 
             }
         });
 
@@ -159,6 +156,8 @@ fn main() -> Result<(), Box<dyn Error>> {
 
     // En loop del juego, decidir si es rustico o normal aleatoriamente y comunicarselo a los jugadores
     // Una vez recibidos todos los datos calcular puntos
+
+    //variables
     let modes = ["normal", "rustico"];
     let mut empieza_normal = 0;
     let mut players_this_round = players;
@@ -174,15 +173,9 @@ fn main() -> Result<(), Box<dyn Error>> {
         score_player.push(0);
     }
 
-
-
-
-
-
-
-
     let mut done = false;
 
+    //handler loop
     'game: loop {
         // Random round mode
         let mode = match modes.choose(&mut rand::thread_rng()) {
@@ -192,7 +185,7 @@ fn main() -> Result<(), Box<dyn Error>> {
 
 
 
-        // Communicate round mode to players
+        // Communicate round mode and permision to play round to players
         for i in 0..players {
             if juega_ronda[i as usize] {
                 tx_mode.send(*mode)?;
@@ -203,31 +196,16 @@ fn main() -> Result<(), Box<dyn Error>> {
 
         //si normal, ordenar, el primer jugador varia, 
         if &modes[0] == mode {
-            if !(juega_ronda[empieza_normal as usize]) {
-                empieza_normal+=1;
-
-            }
-
-            barrier_order[empieza_normal as usize].wait();
-
             for i in 0..players {
-                if !(juega_ronda[i as usize]){
-                    barrier_order[i as usize].wait();
-                    if empieza_normal != ( (i+1)%players){
-                        barrier_order[((i+1)%players) as usize].wait();
-                    }
-                }
+                let number_player = ((i+empieza_normal)%players) as usize;
+                if (juega_ronda[number_player]){
+                    barrier_order[number_player].wait();
+                    barrier_order[number_player].wait();
+                }    
             }
-            //si el anterior al que empezo jugo
-            if juega_ronda[(((empieza_normal-1)+players)%players) as usize] == true{
-                barrier_order[empieza_normal as usize].wait();
-            }
-
-            empieza_normal = (empieza_normal+1)%4;
-        }
-            
-
-
+            empieza_normal = (empieza_normal+1)%players;
+        }//si es rustico y si la anterior tambien tomo el rol de 
+        //un jugador para empezar todos juntos a lanzar cartas
         else {
             if players != players_this_round{
                 round_barrier.wait();
@@ -246,7 +224,7 @@ fn main() -> Result<(), Box<dyn Error>> {
 
             }
         }
-        // Based on the plays, calculate score and determine whether game is over or not
+        // read channel
         let mut card_player : Vec<(Card,i32)>  = Vec::with_capacity(players as usize);
         for (player, cards_left, played_card) in &plays {
 
@@ -263,10 +241,10 @@ fn main() -> Result<(), Box<dyn Error>> {
             }
         }
         //update scores
+
         //normal
         let mut valor_alto_ronda=0;
         let mut cantidad_valor_alto_ronda = 0;
-        // calcular y guardar scores
         
         for card in &card_player {
             if valor_alto_ronda < card.0.value {
@@ -285,24 +263,25 @@ fn main() -> Result<(), Box<dyn Error>> {
             }
             
         }
-
+        //allow all player in next round
         for i in 0..players {
             juega_ronda[i as usize] = true;
         }
-
+        //if round was rustic
         if &modes[1] == mode {
+            //score
             let first_player = &plays[0].0;
             score_player[ (first_player-1) as usize]+=1;
             
             let last_player =&plays[ (players_this_round-1) as usize].0 ;
             score_player[(last_player-1) as usize] -= 5;
 
-            
+            //next round rules
            juega_ronda[ (last_player-1) as usize] = false;
            players_this_round = players - 1
                    
         }else {
-            
+            //if this round wasn t rustic all players play
             players_this_round = players;
         }
 
