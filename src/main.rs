@@ -14,7 +14,7 @@ mod game;
 fn main() -> Result<(), Box<dyn Error>> {
 	let (players, debug) = validator::validate_arguments()?;
 
-    logger::log(String::from("--------------- Starting new run ---------------"))?;
+    logger::log(String::from("--------------- Starting new game ---------------"))?;
     logger::log(String::from("Cantidad de jugadores: ") + &*players.to_string())?;
     logger::log(String::from("Modo de ejecución en debug: ") + &*debug.to_string())?;
 
@@ -23,8 +23,8 @@ fn main() -> Result<(), Box<dyn Error>> {
     game::shuffle_deck(&mut deck);
 
     // Create stacks and distribute the cards among them
-    let cards_per_player = deck.cards.len() as i32 / players;
-    let mut stacks :Vec<Vec<Card>> = vec![Vec::with_capacity(cards_per_player as usize); players as usize];
+    let cards_per_player :i32 = deck.cards.len() as i32 / players;
+    let mut stacks = vec![Vec::with_capacity(cards_per_player as usize); players as usize];
     for _ in 0..cards_per_player {
         for i in 0..players as usize {
             match deck.cards.pop() {
@@ -44,35 +44,25 @@ fn main() -> Result<(), Box<dyn Error>> {
     // Create a barrier to sync players through the rounds
     let round_barrier = Arc::new(Barrier::new(players as usize));
 
-    //Create 1 barrier per player size 2 to syncronyze normal play order
-     //no se como no copiarle todo el array a cada thread
-    let mut barrier_order : Vec<Barrier>  = Vec::with_capacity(players as usize);
+    // Create 1 barrier per player size 2 to sync normal play order
+    let mut turn_barrier = Vec::with_capacity(players as usize);
+    for _ in 0..players { turn_barrier.push(Barrier::new(2)); }
+    let turn_barrier = Arc::new(turn_barrier);
 
-    for _ in 0..players {
-        barrier_order.push(Barrier::new(2));
-    }
-    let barrier_order = Arc::new(barrier_order);
+    // Create 1 barrier per player size 2 to sync if a player plays in the round
+    let mut play_barrier = Vec::with_capacity(players as usize);
+    for _ in 0..players { play_barrier.push(Barrier::new(2)); }
+    let play_barrier = Arc::new(play_barrier);
 
-    //Create 1 barrier per player size 2 to syncronyze if a player plays in the round
-    //no se como no copiarle todo el array a cada thread
-    let mut barrier_round : Vec<Barrier>  = Vec::with_capacity(players as usize);
-
-    for _ in 0..players {
-        barrier_round.push(Barrier::new(2));
-    }
-    let barrier_round = Arc::new(barrier_round);
-
-
-    let mut handles = vec![];
+    let mut handles = Vec::with_capacity(players as usize);
     for j in 1..players + 1 {
         // Clone all the tools
         let mut stacks = stacks.clone();
         let shrx_mode_c = shrx_mode.clone();
         let tx_play_c = tx_play.clone();
         let round_barrier_c = round_barrier.clone(); 
-        //no se como no copiarle todo el array a cada thread
-        let barrier_order_c = barrier_order.clone(); 
-        let barrier_order_c2 = barrier_round.clone(); 
+        let turn_barrier_c = turn_barrier.clone();
+        let play_barrier_c = play_barrier.clone();
 
         // Spawn players
         let handle = thread::spawn(move || {
@@ -82,168 +72,146 @@ fn main() -> Result<(), Box<dyn Error>> {
             // The player j takes their stack of cards
             let my_stack = &mut stacks[(j - 1) as usize];
 
-            let my_turn = &barrier_order_c[(j -1) as usize];
-            
-            let my_round = &barrier_order_c2[(j -1) as usize];
-      
-            
-            
+            // The player j takes their normal-round-turn barrier
+            let my_turn = &turn_barrier_c[(j - 1) as usize];
+
+            // The player j takes their availability-to-play barrier
+            let my_play = &play_barrier_c[(j - 1) as usize];
+
             'game: loop {
                
-                //me toca esta ronda?
-                my_round.wait();    
+                // Players wait for previous round to be over,
+                // or wait for next round to be over if they can't play
+                my_play.wait();
 
-
-                // Mejorar el manejo de los errores en estos match
+                // Players are informed of round mode
                 let mode = match shrx_mode_c.lock() {
                     Ok(shrx_mode_c) => match shrx_mode_c.recv() {
                         Ok(mode) => mode,
-                        Err(_e) => panic!("Failed to receive from channel!"),
+                        Err(e) => panic!("Failed to receive from channel! {}", e),
                     },
-                    Err(_e) => panic!("Poisoned!")
+                    Err(e) => panic!("Poisoned! {}", e)
                 };
-      
-                // Creo que habria que poner una barrier aca para que todos los
-                // jugadores empiecen a la vez. Si no, es injusto
-                // O quizas deberia estar dentro del match, dentro de "normal" y "rustico"
-
                 println!("Player: {}, Mode: {}", j, mode);
+
                 match mode {
-                    "quit" => {
-                        break 'game;
-                    }
+                    "quit" => { break 'game; }
                     "normal" => {
-                        // Si es normal, de alguna forma hay que sincronizar a los threads para que coloquen
-                        // la carta en el channel segun su numero de jugador j
-                        // PLACEHOLDER: POR AHORA HACE LO MISMO QUE EN RUSTICO
 
-                        //es mi turno?
+                        // Wait for my turn to play
                         my_turn.wait();
+
                         let played_card = match my_stack.pop() {
                             Some(card) => card,
-                            None => Card { suit: "wtf do i do".to_string(), value: 0 }
-                        };
-                        let play :(i32, usize, Card) = (j, my_stack.len(), played_card);
-                        tx_play_c.send(play).unwrap();
-                        
-                        my_turn.wait();
-                            
-                    }
-                    "rustico" => {
-                        //empiezan todos juntos, si falta un jugador x q la anterior 
-                        //fue rustico el handler se encarga del ultimo wait
-                        round_barrier_c.wait();
-
-                        // Si es rustica, simplemente es una race condition al send.
-                        // Los match piden que en cada rama se devuelva algo del mismo tipo
-                        let played_card = match my_stack.pop() {
-                            Some(card) => card,
-                            None => Card { suit: "wtf do i do".to_string(), value: 0 }
+                            None => Card { suit: "none".to_string(), value: 0 }
                         };
                         let play :(i32, usize, Card) = (j, my_stack.len(), played_card);
                         match tx_play_c.send(play) {
                             Ok(()) => (),
-                            Err(e) => println!("No se que hacer aca {:?}", e)
+                            Err(e) => panic!("Failed to send through channel! {:?}", e)
+                        };
+
+                        // Inform the host my turn is over
+                        my_turn.wait();
+                    }
+                    "rustic" => {
+
+                        // All players start at the same time. If a player can't play
+                        // this round, the host helps advance this barrier
+                        round_barrier_c.wait();
+
+                        // They race to take a card and play it
+                        let played_card = match my_stack.pop() {
+                            Some(card) => card,
+                            None => Card { suit: "none".to_string(), value: 0 }
+                        };
+                        let play :(i32, usize, Card) = (j, my_stack.len(), played_card);
+                        match tx_play_c.send(play) {
+                            Ok(()) => (),
+                            Err(e) => panic!("Failed to send through channel! {:?}", e)
                         };
                     }
                     _ => {}
                 }
             }
         });
-
         handles.push(handle);
     }
 
-    // En loop del juego, decidir si es rustico o normal aleatoriamente y comunicarselo a los jugadores
-    // Una vez recibidos todos los datos calcular puntos
-
-    //variables
-    let modes = ["normal", "rustico"];
+    let modes = ["normal", "rustic"];
     let mut empieza_normal = 0;
     let mut players_this_round = players;
-    let mut juega_ronda : Vec<bool>  = Vec::with_capacity(players as usize);
-    
-    for _ in 0..players {
-        juega_ronda.push(true);
-    }
-
-    let mut score_player : Vec<i32>  = Vec::with_capacity(players as usize);
-
-    for _ in 0..players {
-        score_player.push(0);
-    }
-
+    let mut plays_round = vec![true; players as usize];
+    let mut scores = vec![0.0; players as usize];
     let mut done = false;
 
-    //handler loop
     'game: loop {
+
         // Random round mode
         let mode = match modes.choose(&mut rand::thread_rng()) {
             Some(mode) => mode,
-            None => panic!("Error!")
+            None => panic!("Error generating mode!")
         };
 
-
-
-        // Communicate round mode and permision to play round to players
+        // Communicate round mode and permission to play round to players
         for i in 0..players {
-            if juega_ronda[i as usize] {
+            if plays_round[i as usize] {
                 tx_mode.send(*mode)?;
-                barrier_round[i as usize].wait();
+                play_barrier[i as usize].wait();
             }
         }
 
-
-        //si normal, ordenar, el primer jugador varia, 
-        if &modes[0] == mode {
-            for i in 0..players {
-                let number_player = ((i+empieza_normal)%players) as usize;
-                if (juega_ronda[number_player]){
-                    barrier_order[number_player].wait();
-                    barrier_order[number_player].wait();
-                }    
+        match mode {
+            //si normal, ordenar, el primer jugador varia -- CHEQUEAR ESTO
+            // If round is normal, coordinate player turns
+            &"normal" => {
+                for i in 0..players {
+                    let number_player = ((i+empieza_normal)%players) as usize;
+                    if plays_round[number_player] {
+                        turn_barrier[number_player].wait();
+                        turn_barrier[number_player].wait();
+                    }
+                }
+                empieza_normal = (empieza_normal+1)%players;
             }
-            empieza_normal = (empieza_normal+1)%players;
-        }//si es rustico y si la anterior tambien tomo el rol de 
-        //un jugador para empezar todos juntos a lanzar cartas
-        else {
-            if players != players_this_round{
-                round_barrier.wait();
+            // If round is rustic and a player can't play, the host will
+            // help advance the barrier so they can start playing
+            &"rustic" => {
+                if players_this_round != players {
+                    round_barrier.wait();
+                }
             }
+            _ => {}
         }
 
         // Gather the plays from the players
         let mut plays = Vec::with_capacity(players_this_round as usize);
-
         for i in 0..players {
-            if juega_ronda[i as usize] {
+            if plays_round[i as usize] {
                 match rx_play.recv() {
                     Ok(play) => plays.push(play),
-                    Err(e) => panic!("Error! {:?}", e)
+                    Err(e) => panic!("Error receiving from channel! {:?}", e)
                 }
-
             }
         }
+
         // read channel
-        let mut card_player : Vec<(Card,i32)>  = Vec::with_capacity(players as usize);
+        let mut card_player :Vec<(Card,i32)>  = Vec::with_capacity(players as usize);
         for (player, cards_left, played_card) in &plays {
 
-            if juega_ronda[(player-1) as usize] {
+            if plays_round[(player - 1) as usize] { // Es necesario este if????
                 println!("GOT FROM {}, CARDS LEFT {}, PLAYED {} OF {}", player, cards_left, played_card.value, played_card.suit);
-     
 
-                card_player.push ((played_card.clone(),*player));
-
+                card_player.push((played_card.clone(),*player));
 
                 if *cards_left == 0 {
                     done = true;
                 }
             }
         }
-        //update scores
 
-        //normal
-        let mut valor_alto_ronda=0;
+        // Calculate scores
+        let mut valor_alto_ronda = 0;
         let mut cantidad_valor_alto_ronda = 0;
         
         for card in &card_player {
@@ -253,36 +221,46 @@ fn main() -> Result<(), Box<dyn Error>> {
         }
         for card in &card_player {
             if valor_alto_ronda == card.0.value {
-                cantidad_valor_alto_ronda = cantidad_valor_alto_ronda+1;    
+                cantidad_valor_alto_ronda = cantidad_valor_alto_ronda + 1;
             }
         }
-
         for card in &card_player {
-             if valor_alto_ronda == card.0.value {
-                score_player[(card.1-1) as usize] += 10/cantidad_valor_alto_ronda;    
+            if valor_alto_ronda == card.0.value {
+                scores[(card.1 - 1) as usize] += (10/cantidad_valor_alto_ronda) as f64;
             }
             
         }
-        //allow all player in next round
-        for i in 0..players {
-            juega_ronda[i as usize] = true;
-        }
-        //if round was rustic
-        if &modes[1] == mode {
-            //score
-            let first_player = &plays[0].0;
-            score_player[ (first_player-1) as usize]+=1;
-            
-            let last_player =&plays[ (players_this_round-1) as usize].0 ;
-            score_player[(last_player-1) as usize] -= 5;
 
-            //next round rules
-           juega_ronda[ (last_player-1) as usize] = false;
-           players_this_round = players - 1
-                   
-        }else {
-            //if this round wasn t rustic all players play
-            players_this_round = players;
+        // Initially, allow all players to play in next round
+        for i in 0..players {
+            plays_round[i as usize] = true;
+        }
+
+        match mode {
+            // If previous round was normal,
+            // all players can play next round
+            &"normal" => {
+                players_this_round = players;
+            }
+
+            // If previous round was rustic,
+            // calculate special scoring rules
+            // and exclude last player from next round
+            &"rustic" => {
+                let first_player = &plays[0].0;
+                scores[(first_player - 1) as usize] += 1.0;
+
+                let last_player = &plays[(players_this_round - 1) as usize].0 ;
+                scores[(last_player - 1) as usize] -= 5.0;
+
+                plays_round[(last_player - 1) as usize] = false;
+                players_this_round = players - 1;
+            }
+            _ => {}
+        }
+
+        for (i, score) in scores.iter().enumerate() {
+            println!("Player {} has a score of {}", i + 1, score);
         }
 
         if done { break 'game; }
@@ -291,7 +269,7 @@ fn main() -> Result<(), Box<dyn Error>> {
 
     // Tell the players the game is over
     for i in 0..players {
-        barrier_round[i as usize].wait();
+        play_barrier[i as usize].wait();
         tx_mode.send("quit")?;
     }
 
