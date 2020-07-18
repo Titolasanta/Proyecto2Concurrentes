@@ -17,6 +17,10 @@ pub fn validate_arguments() -> Result<(i32,bool), Box<dyn Error>> {
     if players < 4 || players % 2 != 0 {
         Err("Number of players must be even and at least 4")?;
     }
+    if players > 48 {
+        Err("Can t have more than 48 players!")?;
+    }
+
 
     let debug = args[2] == String::from("debug");
     std::result::Result::Ok((players, debug))

@@ -1,23 +1,30 @@
 extern crate rand;
 use rand::seq::SliceRandom;
-
+use std::fs::{OpenOptions};
 use std::error::Error;
 use std::thread;
 use std::sync::{mpsc, Mutex, Arc, Barrier};
 use std::sync::mpsc::{Sender, Receiver};
 use crate::game::Card;
 
+mod log;
 mod validator;
-mod logger;
 mod game;
+mod player;
 
 fn main() -> Result<(), Box<dyn Error>> {
 	let (players, debug) = validator::validate_arguments()?;
+    let file = OpenOptions::new().write(true).create(true).truncate(true).open("log.txt")?;
+    let log_lock = Arc::new(Mutex::new(file));
 
-    logger::log(String::from("--------------- Starting new game ---------------"))?;
-    logger::log(String::from("Cantidad de jugadores: ") + &*players.to_string())?;
-    logger::log(String::from("Modo de ejecución en debug: ") + &*debug.to_string())?;
+    let msg = "--------------- Starting new game ---------------".to_string();
+    log::write_log(msg,&*log_lock );
+    let msg = "Cantidad de jugadores: ".to_string()+ &players.to_string();
+    log::write_log(msg,&*log_lock );
+    let msg = "Modo de ejecución en debug: ".to_string()+ &debug.to_string();
+    log::write_log(msg,&*log_lock );
 
+    
     // Create deck of cards and shuffle
     let mut deck = game::create_deck();
     game::shuffle_deck(&mut deck);
@@ -59,18 +66,19 @@ fn main() -> Result<(), Box<dyn Error>> {
         // Clone all the tools
         let mut stacks = stacks.clone();
         let shrx_mode_c = shrx_mode.clone();
-        let tx_play_c = tx_play.clone();
+        let mut tx_play_c = tx_play.clone();
         let round_barrier_c = round_barrier.clone(); 
         let turn_barrier_c = turn_barrier.clone();
         let play_barrier_c = play_barrier.clone();
-
+        let log_lock_c = log_lock.clone();
         // Spawn players
         let handle = thread::spawn(move || {
             // Manejar error de logger dentro del thread
-            // logger::log(String::from("Player number ") + &*j.to_string() + &*String::from(" ready to play"));
+            let msg = "Player number ".to_string() + &j.to_string() + " ready to play";
+            log::write_log(msg,&*log_lock_c );
 
             // The player j takes their stack of cards
-            let my_stack = &mut stacks[(j - 1) as usize];
+            let mut my_stack = &mut stacks[(j - 1) as usize];
 
             // The player j takes their normal-round-turn barrier
             let my_turn = &turn_barrier_c[(j - 1) as usize];
@@ -92,7 +100,11 @@ fn main() -> Result<(), Box<dyn Error>> {
                     },
                     Err(e) => panic!("Poisoned! {}", e)
                 };
-                println!("Player: {}, Mode: {}", j, mode);
+            
+                let msg = "Player ".to_string() + &j.to_string() + ", Mode: " + &mode.to_string();
+                log::write_log(msg,&*log_lock_c );
+
+           
 
                 match mode {
                     "quit" => { break 'game; }
@@ -100,6 +112,9 @@ fn main() -> Result<(), Box<dyn Error>> {
                         // Wait for my turn to play
                         my_turn.wait();
 
+
+                        player::play(my_stack,&mut tx_play_c,j);
+                        /*
                         let played_card = match my_stack.pop() {
                             Some(card) => card,
                             None => Card { suit: "None".to_string(), value: 0 }
@@ -109,7 +124,7 @@ fn main() -> Result<(), Box<dyn Error>> {
                             Ok(()) => (),
                             Err(e) => panic!("Failed to send through channel! {:?}", e)
                         };
-
+                        */
                         // Inform the host my turn is over
                         my_turn.wait();
                     }
@@ -118,6 +133,8 @@ fn main() -> Result<(), Box<dyn Error>> {
                         // this round, the host helps advance this barrier
                         round_barrier_c.wait();
 
+                        player::play(&mut my_stack,&mut tx_play_c,j);
+                        /*
                         // They race to take a card and play it
                         let played_card = match my_stack.pop() {
                             Some(card) => card,
@@ -128,6 +145,7 @@ fn main() -> Result<(), Box<dyn Error>> {
                             Ok(()) => (),
                             Err(e) => panic!("Failed to send through channel! {:?}", e)
                         };
+                        */
                     }
                     _ => {}
                 }
@@ -190,37 +208,39 @@ fn main() -> Result<(), Box<dyn Error>> {
         }
 
         // Get card and player from plays, check if game has to end
-        let mut card_player :Vec<(Card,i32)>  = Vec::with_capacity(players as usize);
         for (player, cards_left, played_card) in &plays {
 
-            if plays_round[(player - 1) as usize] { // Es necesario este if????
-                println!("GOT FROM {}, CARDS LEFT {}, PLAYED {} OF {}", player, cards_left, played_card.value, played_card.suit);
 
-                card_player.push((played_card.clone(),*player));
 
-                if *cards_left == 0 {
-                    done = true;
-                }
+            let mut msg = "GOT FROM ".to_string() + &player.to_string() + ", CARDS LEFT " + &cards_left.to_string();
+            msg = msg + ", PLAYED " + &(played_card.value).to_string() + " OF " + &(played_card.suit).to_string();
+            log::write_log(msg,&*log_lock );
+      
+            //println!("GOT FROM {}, CARDS LEFT {}, PLAYED {} OF {}", player, cards_left, played_card.value, played_card.suit);
+
+
+            if *cards_left == 0 {
+                done = true;
             }
+        
         }
 
         // Calculate scores
         let mut highest_score_round = 0;
-        let mut number_of_highest_score_round = 0;
+        let mut number_of_highest_score_round = 1;
         
-        for card in &card_player {
-            if highest_score_round < card.0.value {
-                highest_score_round = card.0.value;
-            }
-        }
-        for card in &card_player {
-            if highest_score_round == card.0.value {
+        for (_player, _cards_left, played_card) in &plays {
+            if highest_score_round < played_card.value {
+                number_of_highest_score_round = 1;
+                highest_score_round = played_card.value;
+            }else if highest_score_round == played_card.value {
                 number_of_highest_score_round = number_of_highest_score_round + 1;
             }
         }
-        for card in &card_player {
-            if highest_score_round == card.0.value {
-                scores[(card.1 - 1) as usize] += 10.0 / number_of_highest_score_round as f64;
+
+        for (player, _cards_left, played_card) in &plays {
+            if highest_score_round == played_card.value {
+                scores[(player - 1) as usize] += 10.0 / number_of_highest_score_round as f64;
             }
         }
 
@@ -252,8 +272,10 @@ fn main() -> Result<(), Box<dyn Error>> {
         }
 
         // Report current scores
-        for (i, score) in scores.iter().enumerate() {
-            println!("Player {} has a score of {:.2}", i + 1, score);
+        for (i, score) in scores.iter().enumerate() {    
+            let msg = "Player ".to_string()+ &(i+1).to_string() + " has score of " + &score.to_string();
+            log::write_log(msg,&*log_lock );
+            //println!("Player {} has a score of {:.2}", i + 1, score);
         }
 
         if done { break 'game; }
@@ -290,10 +312,13 @@ fn main() -> Result<(), Box<dyn Error>> {
     }
 
     // Report end game results
-    println!("Highest score: {:.2}", highest_score);
-    println!("{} Winner(s):", winners.len());
+    let msg = "Highest score: ".to_string()+ &highest_score.to_string();
+    log::write_log(msg,&*log_lock );
+    let msg = "winner(s): ".to_string()+ &(winners.len()).to_string();
+    log::write_log(msg,&*log_lock );
     for winner in winners {
-        println!("Player {}", winner + 1);
+        let msg = "Player ".to_string() + &(winner+1).to_string();
+        log::write_log(msg,&*log_lock );
     }
 
     Ok(())
