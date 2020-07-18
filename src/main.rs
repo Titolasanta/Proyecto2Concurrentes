@@ -88,7 +88,7 @@ fn main() -> Result<(), Box<dyn Error>> {
                 let mode = match shrx_mode_c.lock() {
                     Ok(shrx_mode_c) => match shrx_mode_c.recv() {
                         Ok(mode) => mode,
-                        Err(e) => panic!("Failed to receive from channel! {}", e),
+                        Err(e) => panic!("Failed to receive from channel! {}", e)
                     },
                     Err(e) => panic!("Poisoned! {}", e)
                 };
@@ -97,13 +97,12 @@ fn main() -> Result<(), Box<dyn Error>> {
                 match mode {
                     "quit" => { break 'game; }
                     "normal" => {
-
                         // Wait for my turn to play
                         my_turn.wait();
 
                         let played_card = match my_stack.pop() {
                             Some(card) => card,
-                            None => Card { suit: "none".to_string(), value: 0 }
+                            None => Card { suit: "None".to_string(), value: 0 }
                         };
                         let play :(i32, usize, Card) = (j, my_stack.len(), played_card);
                         match tx_play_c.send(play) {
@@ -115,7 +114,6 @@ fn main() -> Result<(), Box<dyn Error>> {
                         my_turn.wait();
                     }
                     "rustic" => {
-
                         // All players start at the same time. If a player can't play
                         // this round, the host helps advance this barrier
                         round_barrier_c.wait();
@@ -123,7 +121,7 @@ fn main() -> Result<(), Box<dyn Error>> {
                         // They race to take a card and play it
                         let played_card = match my_stack.pop() {
                             Some(card) => card,
-                            None => Card { suit: "none".to_string(), value: 0 }
+                            None => Card { suit: "None".to_string(), value: 0 }
                         };
                         let play :(i32, usize, Card) = (j, my_stack.len(), played_card);
                         match tx_play_c.send(play) {
@@ -139,7 +137,6 @@ fn main() -> Result<(), Box<dyn Error>> {
     }
 
     let modes = ["normal", "rustic"];
-    let mut empieza_normal = 0;
     let mut players_this_round = players;
     let mut plays_round = vec![true; players as usize];
     let mut scores = vec![0.0; players as usize];
@@ -162,17 +159,14 @@ fn main() -> Result<(), Box<dyn Error>> {
         }
 
         match mode {
-            //si normal, ordenar, el primer jugador varia -- CHEQUEAR ESTO
             // If round is normal, coordinate player turns
             &"normal" => {
-                for i in 0..players {
-                    let number_player = ((i+empieza_normal)%players) as usize;
-                    if plays_round[number_player] {
-                        turn_barrier[number_player].wait();
-                        turn_barrier[number_player].wait();
+                for i in 0..players as usize {
+                    if plays_round[i] {
+                        turn_barrier[i].wait();
+                        turn_barrier[i].wait();
                     }
                 }
-                empieza_normal = (empieza_normal+1)%players;
             }
             // If round is rustic and a player can't play, the host will
             // help advance the barrier so they can start playing
@@ -195,7 +189,7 @@ fn main() -> Result<(), Box<dyn Error>> {
             }
         }
 
-        // read channel
+        // Get card and player from plays, check if game has to end
         let mut card_player :Vec<(Card,i32)>  = Vec::with_capacity(players as usize);
         for (player, cards_left, played_card) in &plays {
 
@@ -211,24 +205,23 @@ fn main() -> Result<(), Box<dyn Error>> {
         }
 
         // Calculate scores
-        let mut valor_alto_ronda = 0;
-        let mut cantidad_valor_alto_ronda = 0;
+        let mut highest_score_round = 0;
+        let mut number_of_highest_score_round = 0;
         
         for card in &card_player {
-            if valor_alto_ronda < card.0.value {
-                valor_alto_ronda = card.0.value    
+            if highest_score_round < card.0.value {
+                highest_score_round = card.0.value;
             }
         }
         for card in &card_player {
-            if valor_alto_ronda == card.0.value {
-                cantidad_valor_alto_ronda = cantidad_valor_alto_ronda + 1;
+            if highest_score_round == card.0.value {
+                number_of_highest_score_round = number_of_highest_score_round + 1;
             }
         }
         for card in &card_player {
-            if valor_alto_ronda == card.0.value {
-                scores[(card.1 - 1) as usize] += (10/cantidad_valor_alto_ronda) as f64;
+            if highest_score_round == card.0.value {
+                scores[(card.1 - 1) as usize] += 10.0 / number_of_highest_score_round as f64;
             }
-            
         }
 
         // Initially, allow all players to play in next round
@@ -242,7 +235,6 @@ fn main() -> Result<(), Box<dyn Error>> {
             &"normal" => {
                 players_this_round = players;
             }
-
             // If previous round was rustic,
             // calculate special scoring rules
             // and exclude last player from next round
@@ -259,8 +251,9 @@ fn main() -> Result<(), Box<dyn Error>> {
             _ => {}
         }
 
+        // Report current scores
         for (i, score) in scores.iter().enumerate() {
-            println!("Player {} has a score of {}", i + 1, score);
+            println!("Player {} has a score of {:.2}", i + 1, score);
         }
 
         if done { break 'game; }
@@ -277,8 +270,30 @@ fn main() -> Result<(), Box<dyn Error>> {
     for handle in handles {
         match handle.join() {
             Ok(()) => (),
-            Err(e) => panic!("A thread panicked! Error: {:?}", e),
+            Err(e) => panic!("A thread panicked! Error: {:?}", e)
         }
+    }
+
+    // Calculate end game results
+    let mut highest_score = 0.0;
+    let mut winners = Vec::new();
+
+    for (_, score) in scores.iter().enumerate() {
+        if highest_score < *score {
+            highest_score = *score;
+        }
+    }
+    for (i, score) in scores.iter().enumerate() {
+        if highest_score == *score {
+            winners.push(i);
+        }
+    }
+
+    // Report end game results
+    println!("Highest score: {:.2}", highest_score);
+    println!("{} Winner(s):", winners.len());
+    for winner in winners {
+        println!("Player {}", winner + 1);
     }
 
     Ok(())
