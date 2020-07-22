@@ -3,10 +3,10 @@ use std::error::Error;
 
 pub fn validate_arguments() -> Result<(i32,bool), Box<dyn Error>> {
     let args: Vec<String> = env::args().collect();
-    let expected_arguments = 2;
+    let expected_arguments = 1;
 
-    if args.len() != (expected_arguments + 1) {
-        Err("Number of players and debug mode must be specified")?;
+    if args.len() < (expected_arguments + 1) {
+        Err("Number of players must be specified")?;
     }
 
     let players: i32 = match args[1].parse::<i32>() {
@@ -18,6 +18,10 @@ pub fn validate_arguments() -> Result<(i32,bool), Box<dyn Error>> {
         Err("Number of players must be even and between 4 and 48")?;
     }
 
-    let debug = args[2] == String::from("debug");
+    let mut debug = false;
+    if args.len() == 3 {
+        debug = args[2] == String::from("debug");
+    }
+
     std::result::Result::Ok((players, debug))
 }
