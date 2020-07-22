@@ -19,11 +19,11 @@ fn main() -> Result<(), Box<dyn Error>> {
     let log_lock = Arc::new(Mutex::new(file));
 
     let msg = "--------------- Starting new game ---------------".to_string();
-    log::write_log(msg,&*log_lock );
+    log::write_log(msg,&*log_lock ,&debug);
     let msg = "Cantidad de jugadores: ".to_string()+ &players.to_string();
-    log::write_log(msg,&*log_lock );
+    log::write_log(msg,&*log_lock ,&debug);
     let msg = "Modo de ejecución en debug: ".to_string()+ &debug.to_string();
-    log::write_log(msg,&*log_lock );
+    log::write_log(msg,&*log_lock ,&debug);
 
     
     // Create deck of cards and shuffle
@@ -76,7 +76,7 @@ fn main() -> Result<(), Box<dyn Error>> {
         let handle = thread::spawn(move || {
             // Manejar error de logger dentro del thread
             let msg = "Player number ".to_string() + &j.to_string() + " ready to play";
-            log::write_log(msg,&*log_lock_c );
+            log::write_log(msg,&*log_lock_c ,&debug);
 
             // The player j takes their stack of cards
             let mut my_stack = &mut stacks[(j - 1) as usize];
@@ -103,7 +103,7 @@ fn main() -> Result<(), Box<dyn Error>> {
                 };
             
                 let msg = "Player ".to_string() + &j.to_string() + ", Mode: " + &mode.to_string();
-                log::write_log(msg,&*log_lock_c );
+                log::write_log(msg,&*log_lock_c,&debug );
 
            
 
@@ -193,7 +193,7 @@ fn main() -> Result<(), Box<dyn Error>> {
 
             let mut msg = "GOT FROM ".to_string() + &player.to_string() + ", CARDS LEFT " + &cards_left.to_string();
             msg = msg + ", PLAYED " + &(played_card.value).to_string() + " OF " + &(played_card.suit).to_string();
-            log::write_log(msg,&*log_lock );
+            log::write_log(msg,&*log_lock ,&debug);
       
             //println!("GOT FROM {}, CARDS LEFT {}, PLAYED {} OF {}", player, cards_left, played_card.value, played_card.suit);
 
@@ -236,7 +236,7 @@ fn main() -> Result<(), Box<dyn Error>> {
         // Report current scores
         for (i, score) in scores.iter().enumerate() {    
             let msg = "Player ".to_string()+ &(i+1).to_string() + " has score of " + &score.to_string();
-            log::write_log(msg,&*log_lock );
+            log::write_log(msg,&*log_lock ,&debug);
             //println!("Player {} has a score of {:.2}", i + 1, score);
         }
 
@@ -275,12 +275,12 @@ fn main() -> Result<(), Box<dyn Error>> {
 
     // Report end game results
     let msg = "Highest score: ".to_string()+ &highest_score.to_string();
-    log::write_log(msg,&*log_lock );
+    log::write_log(msg,&*log_lock ,&debug);
     let msg = "winner(s): ".to_string()+ &(winners.len()).to_string();
-    log::write_log(msg,&*log_lock );
+    log::write_log(msg,&*log_lock ,&debug);
     for winner in winners {
         let msg = "Player ".to_string() + &(winner+1).to_string();
-        log::write_log(msg,&*log_lock );
+        log::write_log(msg,&*log_lock ,&debug);
     }
 
     Ok(())
