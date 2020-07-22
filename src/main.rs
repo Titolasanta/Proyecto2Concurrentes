@@ -19,12 +19,11 @@ fn main() -> Result<(), Box<dyn Error>> {
     let log_lock = Arc::new(Mutex::new(file));
 
     let msg = "--------------- Starting new game ---------------".to_string();
-    log::write_log(msg,&*log_lock ,&debug);
-    let msg = "Cantidad de jugadores: ".to_string()+ &players.to_string();
-    log::write_log(msg,&*log_lock ,&debug);
-    let msg = "Modo de ejecución en debug: ".to_string()+ &debug.to_string();
-    log::write_log(msg,&*log_lock ,&debug);
-
+    log::write_log(msg, &*log_lock, &debug);
+    let msg = "Cantidad de jugadores: ".to_string() + &players.to_string();
+    log::write_log(msg, &*log_lock, &debug);
+    let msg = "Modo de ejecución en debug: ".to_string() + &debug.to_string();
+    log::write_log(msg, &*log_lock, &debug);
     
     // Create deck of cards and shuffle
     let mut deck = game::create_deck();
@@ -72,11 +71,11 @@ fn main() -> Result<(), Box<dyn Error>> {
         let turn_barrier_c = turn_barrier.clone();
         let play_barrier_c = play_barrier.clone();
         let log_lock_c = log_lock.clone();
+
         // Spawn players
         let handle = thread::spawn(move || {
-            // Manejar error de logger dentro del thread
             let msg = "Player number ".to_string() + &j.to_string() + " ready to play";
-            log::write_log(msg,&*log_lock_c ,&debug);
+            log::write_log(msg, &*log_lock_c, &debug);
 
             // The player j takes their stack of cards
             let mut my_stack = &mut stacks[(j - 1) as usize];
@@ -97,15 +96,10 @@ fn main() -> Result<(), Box<dyn Error>> {
                 let mode = match shrx_mode_c.lock() {
                     Ok(shrx_mode_c) => match shrx_mode_c.recv() {
                         Ok(mode) => mode,
-                        Err(e) => panic!("Failed to receive from channel! {}", e)
+                        Err(e) => panic!("Failed to receive from channel! {:?}", e)
                     },
-                    Err(e) => panic!("Poisoned! {}", e)
+                    Err(e) => panic!("Poisoned! {:?}", e)
                 };
-            
-                let msg = "Player ".to_string() + &j.to_string() + ", Mode: " + &mode.to_string();
-                log::write_log(msg,&*log_lock_c,&debug );
-
-           
 
                 match mode {
                     "quit" => { break 'game; }
@@ -113,7 +107,7 @@ fn main() -> Result<(), Box<dyn Error>> {
                         // Wait for my turn to play
                         my_turn.wait();
 
-                        player::play(my_stack,&mut tx_play_c,j);
+                        player::play(my_stack, &mut tx_play_c, j);
 
                         // Inform the host my turn is over
                         my_turn.wait();
@@ -123,8 +117,7 @@ fn main() -> Result<(), Box<dyn Error>> {
                         // this round, the host helps advance this barrier
                         round_barrier_c.wait();
 
-                        player::play(&mut my_stack,&mut tx_play_c,j);
-
+                        player::play(&mut my_stack, &mut tx_play_c, j);
                     }
                     _ => {}
                 }
@@ -148,12 +141,15 @@ fn main() -> Result<(), Box<dyn Error>> {
         };
 
         // Communicate round mode and permission to play round to players
-        for i in 0..players {
-            if plays_round[i as usize] {
+        for i in 0..players as usize {
+            if plays_round[i] {
                 tx_mode.send(*mode)?;
-                play_barrier[i as usize].wait();
+                play_barrier[i].wait();
             }
         }
+
+        let msg = "Round mode: ".to_string() + &mode.to_string();
+        log::write_log(msg, &*log_lock, &debug);
 
         match mode {
             // If round is normal, coordinate player turns
@@ -177,8 +173,8 @@ fn main() -> Result<(), Box<dyn Error>> {
 
         // Gather the plays from the players
         let mut plays = Vec::with_capacity(players_this_round as usize);
-        for i in 0..players {
-            if plays_round[i as usize] {
+        for i in 0..players as usize {
+            if plays_round[i] {
                 match rx_play.recv() {
                     Ok(play) => plays.push(play),
                     Err(e) => panic!("Error receiving from channel! {:?}", e)
@@ -186,30 +182,24 @@ fn main() -> Result<(), Box<dyn Error>> {
             }
         }
 
-        // Get card and player from plays, check if game has to end
+        // Report plays, check if game has to end
         for (player, cards_left, played_card) in &plays {
 
-
-
-            let mut msg = "GOT FROM ".to_string() + &player.to_string() + ", CARDS LEFT " + &cards_left.to_string();
-            msg = msg + ", PLAYED " + &(played_card.value).to_string() + " OF " + &(played_card.suit).to_string();
-            log::write_log(msg,&*log_lock ,&debug);
-      
-            //println!("GOT FROM {}, CARDS LEFT {}, PLAYED {} OF {}", player, cards_left, played_card.value, played_card.suit);
-
+            let mut msg = "Got from player: ".to_string() + &player.to_string() + ", Cards left: " + &cards_left.to_string();
+            msg = msg + ", Played: " + &(played_card.value).to_string() + " of " + &(played_card.suit).to_string();
+            log::write_log(msg, &*log_lock, &debug);
 
             if *cards_left == 0 {
                 done = true;
             }
-        
         }
 
         // Calculate scores
+        scorer::score_round(&plays, &mut scores);
 
-        scorer::score_round(&plays,&mut scores);
         // Initially, allow all players to play in next round
-        for i in 0..players {
-            plays_round[i as usize] = true;
+        for i in 0..players as usize {
+            plays_round[i] = true;
         }
 
         match mode {
@@ -222,11 +212,9 @@ fn main() -> Result<(), Box<dyn Error>> {
             // calculate special scoring rules
             // and exclude last player from next round
             &"rustic" => {
+                scorer::score_round_rustic(&plays, &mut scores, players_this_round);
 
-
-                scorer::score_round_rustic(&plays,&mut scores, players_this_round);
-
-                let last_player = &plays[(players_this_round - 1) as usize].0 ;
+                let last_player = &plays[(players_this_round - 1) as usize].0;
                 plays_round[(last_player - 1) as usize] = false;
                 players_this_round = players - 1;
             }
@@ -236,17 +224,15 @@ fn main() -> Result<(), Box<dyn Error>> {
         // Report current scores
         for (i, score) in scores.iter().enumerate() {    
             let msg = "Player ".to_string()+ &(i+1).to_string() + " has score of " + &score.to_string();
-            log::write_log(msg,&*log_lock ,&debug);
-            //println!("Player {} has a score of {:.2}", i + 1, score);
+            log::write_log(msg, &*log_lock, &debug);
         }
 
         if done { break 'game; }
-
     }
 
     // Tell the players the game is over
-    for i in 0..players {
-        play_barrier[i as usize].wait();
+    for i in 0..players as usize {
+        play_barrier[i].wait();
         tx_mode.send("quit")?;
     }
 
@@ -274,13 +260,13 @@ fn main() -> Result<(), Box<dyn Error>> {
     }
 
     // Report end game results
-    let msg = "Highest score: ".to_string()+ &highest_score.to_string();
-    log::write_log(msg,&*log_lock ,&debug);
-    let msg = "winner(s): ".to_string()+ &(winners.len()).to_string();
-    log::write_log(msg,&*log_lock ,&debug);
+    let msg = "Highest score: ".to_string() + &highest_score.to_string();
+    log::write_log(msg, &*log_lock, &debug);
+    let msg = "Winner(s): ".to_string() + &(winners.len()).to_string();
+    log::write_log(msg, &*log_lock, &debug);
     for winner in winners {
         let msg = "Player ".to_string() + &(winner+1).to_string();
-        log::write_log(msg,&*log_lock ,&debug);
+        log::write_log(msg, &*log_lock, &debug);
     }
 
     Ok(())
