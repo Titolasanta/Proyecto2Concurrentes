@@ -10,6 +10,7 @@ use crate::game::Card;
 mod log;
 mod validator;
 mod game;
+mod scorer;
 mod player;
 
 fn main() -> Result<(), Box<dyn Error>> {
@@ -112,19 +113,8 @@ fn main() -> Result<(), Box<dyn Error>> {
                         // Wait for my turn to play
                         my_turn.wait();
 
-
                         player::play(my_stack,&mut tx_play_c,j);
-                        /*
-                        let played_card = match my_stack.pop() {
-                            Some(card) => card,
-                            None => Card { suit: "None".to_string(), value: 0 }
-                        };
-                        let play :(i32, usize, Card) = (j, my_stack.len(), played_card);
-                        match tx_play_c.send(play) {
-                            Ok(()) => (),
-                            Err(e) => panic!("Failed to send through channel! {:?}", e)
-                        };
-                        */
+
                         // Inform the host my turn is over
                         my_turn.wait();
                     }
@@ -134,18 +124,7 @@ fn main() -> Result<(), Box<dyn Error>> {
                         round_barrier_c.wait();
 
                         player::play(&mut my_stack,&mut tx_play_c,j);
-                        /*
-                        // They race to take a card and play it
-                        let played_card = match my_stack.pop() {
-                            Some(card) => card,
-                            None => Card { suit: "None".to_string(), value: 0 }
-                        };
-                        let play :(i32, usize, Card) = (j, my_stack.len(), played_card);
-                        match tx_play_c.send(play) {
-                            Ok(()) => (),
-                            Err(e) => panic!("Failed to send through channel! {:?}", e)
-                        };
-                        */
+
                     }
                     _ => {}
                 }
@@ -226,24 +205,8 @@ fn main() -> Result<(), Box<dyn Error>> {
         }
 
         // Calculate scores
-        let mut highest_score_round = 0;
-        let mut number_of_highest_score_round = 1;
-        
-        for (_player, _cards_left, played_card) in &plays {
-            if highest_score_round < played_card.value {
-                number_of_highest_score_round = 1;
-                highest_score_round = played_card.value;
-            }else if highest_score_round == played_card.value {
-                number_of_highest_score_round = number_of_highest_score_round + 1;
-            }
-        }
 
-        for (player, _cards_left, played_card) in &plays {
-            if highest_score_round == played_card.value {
-                scores[(player - 1) as usize] += 10.0 / number_of_highest_score_round as f64;
-            }
-        }
-
+        scorer::score_round(&plays,&mut scores);
         // Initially, allow all players to play in next round
         for i in 0..players {
             plays_round[i as usize] = true;
@@ -259,12 +222,11 @@ fn main() -> Result<(), Box<dyn Error>> {
             // calculate special scoring rules
             // and exclude last player from next round
             &"rustic" => {
-                let first_player = &plays[0].0;
-                scores[(first_player - 1) as usize] += 1.0;
+
+
+                scorer::score_round_rustic(&plays,&mut scores, players_this_round);
 
                 let last_player = &plays[(players_this_round - 1) as usize].0 ;
-                scores[(last_player - 1) as usize] -= 5.0;
-
                 plays_round[(last_player - 1) as usize] = false;
                 players_this_round = players - 1;
             }

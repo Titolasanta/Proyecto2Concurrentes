@@ -1,5 +1,5 @@
 
-use std::io::{Write};
+use std::io::{Write};	
 
 pub fn write_log(msg: std::string::String,lock: &std::sync::Mutex<std::fs::File>) -> () {
 
