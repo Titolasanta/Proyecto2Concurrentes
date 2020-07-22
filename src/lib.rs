@@ -1,6 +1,6 @@
-mod game;
-mod player;
-mod scorer;
+pub mod game;
+pub mod player;
+pub mod scorer;
 
 #[cfg(test)]
 mod tests {
